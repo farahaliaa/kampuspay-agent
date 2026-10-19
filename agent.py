@@ -52,11 +52,11 @@ def fx_impact(amount_home: float, pair: str, shock_pct: float) -> dict:
     shocked_rate = base_rate * (1 + shock_pct / 100)
     extra = amount_home * (shocked_rate - base_rate)
 
-    result = {
+    return {
         "pair": pair,
         "base_rate": round(base_rate, 6),
         "shocked_rate": round(shocked_rate, 6),
-        "extra_cost": round(extra, 2),
+        "destination_currency_delta": round(extra, 2), # Renamed from extra_cost
         "recommended_buffer_pct": round(max(5, abs(shock_pct) * 1.5), 2)
     }
 
@@ -129,17 +129,28 @@ def execute_transfer(from_owner: str, to_owner: str, amount: float,
     risk_score = 0
     reasons = []
 
+    # --- HARD LIMIT CHECK (Point 1) ---
     if amount > 5000:
-        risk_score += 40
-        reasons.append("exceeds_per_tx_limit(5000)")
+        log_action("kai", "transfer_blocked",
+                   {"from": from_owner, "to": to_owner, "amount": amount},
+                   "hard_limit_exceeded: amount > 5000")
+        return {
+            "status": "blocked",
+            "risk_score": 100,
+            "reasons": ["exceeds_hard_per_tx_limit(5000)"],
+            "message": "Transfer blocked. Exceeds the absolute maximum limit of 5,000."
+        }
 
+    # --- RISK SCORING (Point 2 fixed) ---
     if amount > 1000:
         history = supabase.table("transactions") \
             .select("id") \
             .eq("from_acct", from_acct.data[0]["id"]) \
             .eq("to_acct", to_acct.data[0]["id"]) \
             .execute()
+        
         if not history.data:
+            # Only apply these rules if it IS a new beneficiary
             risk_score += 20
             reasons.append("new_beneficiary")
             if amount > 1000:
@@ -234,34 +245,3 @@ Rules:
 """,
     tools=[get_balance, fx_impact, build_plan, execute_transfer]
 )
-
-
-if __name__ == "__main__" and os.getenv("RUN_AGENT_MAIN") == "1":
-    prompt = "Transfer 2000 from Aiman to China Univ X for tuition."
-    result = Runner.run_sync(kai, prompt)
-    print("\n--- Kai says ---")
-    print(result.final_output)
-
-    from agent import supabase
-
-class FXRequest(BaseModel):
-    amount_home: float
-    pair: str
-    shock_pct: float
-
-@app.post("/fx-impact")
-def fx_impact_endpoint(req: FXRequest):
-    rate_row = supabase.table("fx_rates").select("rate") \
-        .eq("pair", req.pair).order("ts", desc=True).limit(1).execute()
-    base_rate = float(rate_row.data[0]["rate"]) if rate_row.data else 1.0
-    shocked_rate = base_rate * (1 + req.shock_pct / 100)
-    extra = req.amount_home * (shocked_rate - base_rate)
-    return {
-        "pair": req.pair,
-        "base_rate": round(base_rate, 6),
-        "shocked_rate": round(shocked_rate, 6),
-        "base_cost_dest": round(req.amount_home * base_rate, 2),
-        "shocked_cost_dest": round(req.amount_home * shocked_rate, 2),
-        "extra_cost": round(extra, 2),
-        "recommended_buffer_pct": round(max(5, abs(req.shock_pct) * 1.5), 2),
-    }
