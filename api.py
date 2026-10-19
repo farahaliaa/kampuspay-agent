@@ -134,7 +134,20 @@ class FXRequest(BaseModel):
     pair: str
     shock_pct: float
 
+
 @app.post("/fx-impact")
 def fx_impact_endpoint(req: FXRequest):
-    from engine_fx import compute_fx_impact  # we'll create this next
-    return compute_fx_impact(req.amount_home, req.pair, req.shock_pct)
+    rate_row = supabase.table("fx_rates").select("rate") \
+        .eq("pair", req.pair).order("ts", desc=True).limit(1).execute()
+    base_rate = float(rate_row.data[0]["rate"]) if rate_row.data else 1.0
+    shocked_rate = base_rate * (1 + req.shock_pct / 100)
+    extra = req.amount_home * (shocked_rate - base_rate)
+    return {
+        "pair": req.pair,
+        "base_rate": round(base_rate, 6),
+        "shocked_rate": round(shocked_rate, 6),
+        "base_cost_dest": round(req.amount_home * base_rate, 2),
+        "shocked_cost_dest": round(req.amount_home * shocked_rate, 2),
+        "extra_cost": round(extra, 2),
+        "recommended_buffer_pct": round(max(5, abs(req.shock_pct) * 1.5), 2),
+    }
