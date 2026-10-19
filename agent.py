@@ -52,20 +52,23 @@ def fx_impact(amount_home: float, pair: str, shock_pct: float) -> dict:
     shocked_rate = base_rate * (1 + shock_pct / 100)
     extra = amount_home * (shocked_rate - base_rate)
 
-    return {
+    result = {
         "pair": pair,
         "base_rate": round(base_rate, 6),
         "shocked_rate": round(shocked_rate, 6),
-        "destination_currency_delta": round(extra, 2), # Renamed from extra_cost
+        "destination_currency_delta": round(extra, 2),
         "recommended_buffer_pct": round(max(5, abs(shock_pct) * 1.5), 2)
     }
 
+    # 1. Log it FIRST
     log_action(
         "kai",
         "tool:fx_impact",
-        {"pair": pair, "shock_pct": shock_pct, "extra_cost": result["extra_cost"]},
+        {"pair": pair, "shock_pct": shock_pct, "extra_cost": result["destination_currency_delta"]},
         f"analysed {shock_pct}% FX shock on {pair}"
     )
+    
+    # 2. THEN return the result
     return result
 
 
